@@ -6,7 +6,7 @@
   # License: Copyright (c) This program is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation; either version 3 of the License, or (at your option) any later version.
 
 # Load settings, tables file
-source /path_to_scripts/p2r_settings.sh
+source /home/dw_prod/src/open-data-science/postgres2redshift/p2r_settings.sh
 
 
 ########################################
@@ -101,8 +101,7 @@ date
 # dumping original tables
 for table in $TABLES
 do
-  $PGSQL_BIN/psql -h $DBHOST -p $DBHOSTPORT -U $DBOWNER -d $DBNAME -c \
-    "\copy ${table} TO STDOUT (FORMAT csv, DELIMITER '|', HEADER 0)" \
+  echo "set search_path to $DBSCHEMA; \copy ${table} TO STDOUT (FORMAT csv, DELIMITER '|', HEADER 0)" | $PGSQL_BIN/psql -h $DBHOST -p $DBHOSTPORT -U $DBOWNER -d $DBNAME \
     | gzip > $DATADIR/${table}.txt.gz
 done
 
@@ -110,7 +109,7 @@ done
 for (( i = 0 ; i < ${#CTSQL[@]} ; i++ )) 
 do
   $PGSQL_BIN/psql -h $DBHOST -p $DBHOSTPORT -U $DBOWNER -d $DBNAME -c \
-    "\copy ( ${CTSQL[$i]} ) TO STDOUT (FORMAT csv, DELIMITER '|', HEADER 0)" \
+    "set search_path to $DBSCHEMA; \copy ( ${CTSQL[$i]} ) TO STDOUT (FORMAT csv, DELIMITER '|', HEADER 0)" \
     | gzip > $DATADIR/${CTNAMES[$i]}.txt.gz
 done
 

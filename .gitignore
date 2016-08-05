@@ -1,0 +1,4 @@
+postgres2redshift/schema.sql
+postgres2redshift/schema_clean.sql*
+postgres2redshift/schema_final.sql*
+postgres2redshift/p2r_settings.sh
