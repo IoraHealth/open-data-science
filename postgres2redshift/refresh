@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# Just the refresh part of the package
+
+source $HOME/bin/redshift-setup
+source ./p2r_settings.sh
+
+  $PGSQL_BIN/psql -h $RSHOST -p $RSHOSTPORT -U $RSADMIN -d $RSNAME -c \
+    "SET search_path TO $RSSCHEMA;
+    DROP SCHEMA IF EXISTS $RSSCHEMA CASCADE;
+    ALTER SCHEMA $TMPSCHEMA RENAME TO $RSSCHEMA;
+    GRANT ALL ON SCHEMA $RSSCHEMA TO $RSUSER;
+    GRANT USAGE ON SCHEMA $RSSCHEMA TO $RSUSER;
+    GRANT SELECT ON ALL TABLES IN SCHEMA $RSSCHEMA TO $RSUSER;
+    COMMENT ON SCHEMA $RSSCHEMA IS 'analytics data schema';" 
+
+  echo "`date`    restore tables complete"
+
+  echo "`date`    start vacuum analyze"
+
+  $PGSQL_BIN/psql -h $RSHOST -p $RSHOSTPORT -U $RSADMIN -d $RSNAME -c "vacuum; analyze;" 
+
+  echo "`date`    bulk refresh complete"
