@@ -17,7 +17,6 @@ source /home/dw_prod/src/open-data-science/postgres2redshift/p2r_settings.sh
 # This section parses command line arguments when you execute the script with /path/to/p2r_main.sh -h source_db_host_name -p 5432 -U dbuser -d dbname 2>&1 >> /tmp/p2r.log
 
 if [ ! -e $LOCKFILE ]; then
-  echo "***********************************"
   echo $$ >$LOCKFILE
 
 PROGNAME=`basename $0`
@@ -95,13 +94,13 @@ fi
 #           Begin Data Dump
 ########################################
 
-echo DUMPING TABLES
-date
+echo "`date`    dumping tables"
 
 # dumping original tables
 for table in $TABLES
 do
   echo "set search_path to $DBSCHEMA; \copy ${table} TO STDOUT (FORMAT csv, DELIMITER '|', HEADER 0)" | $PGSQL_BIN/psql -h $DBHOST -p $DBHOSTPORT -U $DBOWNER -d $DBNAME \
+    | tail -n +2 \
     | gzip > $DATADIR/${table}.txt.gz
 done
 
@@ -110,18 +109,17 @@ for (( i = 0 ; i < ${#CTSQL[@]} ; i++ ))
 do
   $PGSQL_BIN/psql -h $DBHOST -p $DBHOSTPORT -U $DBOWNER -d $DBNAME -c \
     "set search_path to $DBSCHEMA; \copy ( ${CTSQL[$i]} ) TO STDOUT (FORMAT csv, DELIMITER '|', HEADER 0)" \
+    | tail -n +2 \
     | gzip > $DATADIR/${CTNAMES[$i]}.txt.gz
 done
 
-echo DUMPING TABLES COMPLETE
-date
+echo "`date`    dumping tables complete"
 
 ########################################
 #          SHIP TABLES TO S3
 ########################################
 
-echo SHIP TO S3
-date
+echo "`date`    ship to s3"
 
 # ship original tables
 for table in $TABLES
@@ -135,16 +133,14 @@ do
   s3cmd put $DATADIR/${table}.txt.gz s3://$S3BUCKET/ --force 1>>$STDOUT 2>>$STDERR
 done
 
-echo SHIP TO S3 COMPLETE
-date
+echo "`date`    ship to s3 complete"
 
 
 ########################################
 #       Get and clean schema
 ########################################
 
-echo GET/CLEAN/UPLOAD DB SCHEMA
-date
+echo "`date`    get/clean/upload db schema"
 
 # remove any schema* files from the directory
 rm -rf $SCRPTDIR/schema*
@@ -190,6 +186,17 @@ sed -i.bak -e 's/\(.*\) \(\btext\b\|\bcharacter varying\b.*\) NOT NULL/\1 \2/' \
 # Custom Cleaning (add any regex to clean out other edge cases if your schema fails to build in Redshift)
 sed -i.bak '/CREATE TABLE your_unwanted_table_name*/,/);/d' $SCRPTDIR/schema_clean.sql
 
+# IORA
+sed -i.bak '/CREATE TABLE claims_*/,/);/d'                     $SCRPTDIR/schema_clean.sql
+sed -i.bak '/CREATE TABLE utilization_*/,/);/d'                $SCRPTDIR/schema_clean.sql
+perl -0777 -i -pe 's/timestamp.*NOT NULL/timestamp/g'          $SCRPTDIR/schema_clean.sql
+perl -0777 -i -pe 's/timestamp without time zone/timestamp/g'  $SCRPTDIR/schema_clean.sql
+perl -0777 -i -pe 's/timestamp with time zone/timestamp/g'     $SCRPTDIR/schema_clean.sql
+perl -0777 -i -pe 's/varchar\(max\)\[\]/varchar(max)/g'            $SCRPTDIR/schema_clean.sql
+perl -0777 -i -pe 's/timestamp\(6\) without time zone/timestamp/g'    $SCRPTDIR/schema_clean.sql
+perl -0777 -i -pe 's/ unknown/ character varying(50)/g'                $SCRPTDIR/schema_clean.sql
+ruby $SCRPTDIR/remove_compound_keys.rb <$SCRPTDIR/schema_clean.sql >$SCRPTDIR/schema_clean_no_compoound_keys.sql
+cp $SCRPTDIR/schema_clean_no_compoound_keys.sql $SCRPTDIR/schema_clean.sql
 
 ##### 2. Add sortkeys to table definitions (python script)
 
@@ -207,9 +214,10 @@ sed -n '/ALTER TABLE/,/;/p' $SCRPTDIR/schema_clean.sql >> $SCRPTDIR/schema_final
 # add search_path to temp_schema
 sed -i "1 i SET search_path TO ${TMPSCHEMA};" $SCRPTDIR/schema_final.sql
 
-echo CREATE NEW TEMP SCHEMA
+echo "`date`    create new temp schema"
+
 $PGSQL_BIN/psql -h $RSHOST -p $RSHOSTPORT -U $RSADMIN -d $RSNAME -c \
-  "DROP SCHEMA IF EXISTS $TMPSCHEMA;
+  "DROP SCHEMA IF EXISTS $TMPSCHEMA CASCADE;
   CREATE SCHEMA $TMPSCHEMA;
   SET search_path TO $TMPSCHEMA;
   GRANT ALL ON SCHEMA $TMPSCHEMA TO $RSUSER;
@@ -227,8 +235,7 @@ $PGSQL_BIN/psql -h $RSHOST -p $RSHOSTPORT -U $RSADMIN -d $RSNAME -f $SCRPTDIR/sc
 ########################################
 
 
-echo START RESTORE TABLES IN REDSHIFT
-date
+echo "`date`    start restore tables in redshift"
 
 # Copy a table into Redshift from S3 file:
   # To test without the data load, add NOLOAD to the copy command. 
@@ -272,22 +279,21 @@ if [ $LEN -lt 1 ]; then
     GRANT SELECT ON ALL TABLES IN SCHEMA $RSSCHEMA TO $RSUSER;
     COMMENT ON SCHEMA $RSSCHEMA IS 'analytics data schema';" 1>>$STDOUT 2>>$STDERR
 
-  echo RESTORE TABLES COMPLETE
-  date
+  echo "`date`    restore tables complete"
 
-  echo START VACUUM ANALYZE 
+  echo "`date`    start vacuum analyze"
 
   $PGSQL_BIN/psql -h $RSHOST -p $RSHOSTPORT -U $RSADMIN -d $RSNAME -c "vacuum; analyze;" 1>>$STDOUT 2>>$STDERR
 
-  echo BULK REFRESH COMPLETE
+  echo "`date`    bulk refresh complete"
 
 else
 
-  echo BULK REFRESH FAILED
+  echo "`date`    bulk refresh failed"
 
 fi
 
-echo ALERT OF ANY ERRORS OVER EMAIL
+echo "`date`    alert of any errors over email"
 
 BODY="$(egrep '^ERROR' $STDERR)"
 
@@ -300,9 +306,6 @@ Subject: $SUBJECT
 $BODY
 EOF
 ) | /usr/lib/sendmail -oi -t -od
-
-date
-echo "***********************************"
 
 
 ########################################
